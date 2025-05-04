@@ -9,40 +9,42 @@ from statsmodels.stats.multitest import multipletests
 
 def differential_expression(df, control_samples, problem_samples):
     """
-    Realiza análisis de expresión diferencial entre dos grupos.
+    Performs differential expression analysis between two groups.
 
-    Parámetros:
-    - df: DataFrame con muestras en filas y genes en columnas
-    - control_samples: lista de nombres de muestras control
-    - problem_samples: lista de nombres de muestras a comparar vs control
+    Parameters:
+    - df: DataFrame with samples in rows and genes in columns
+    - control_samples: list of control sample names
+    - problem_samples: list of sample names to compare against controls
 
-    Retorna:
-    - df_results: DataFrame con p-valores, FDR y log2FC por gen
+    Returns:
+    - df_results: DataFrame with p-values, FDR, and log2FC per gene
     """
 
-    # Validar que todas las muestras existan en el índice
+    # Validate that all specified samples exist in the DataFrame
     all_samples = control_samples + problem_samples
     missing = [s for s in all_samples if s not in df.index]
     if missing:
-        raise ValueError(f"Las siguientes muestras no están en el DataFrame: {missing}")
+        raise ValueError(f"The following samples are missing from the DataFrame: {missing}")
 
     results = []
 
     for gene in df.columns:
+        # Extract expression values for the current gene
         g1 = df.loc[control_samples, gene].dropna()
         g2 = df.loc[problem_samples, gene].dropna()
 
+        # Skip genes with insufficient data
         if len(g1) < 2 or len(g2) < 2:
-            continue  # Saltamos genes con datos insuficientes
+            continue
 
-        # Estadística t
+        # Perform Welch's t-test (unequal variances)
         stat, pval = ttest_ind(g1, g2, equal_var=False)
 
-        # Log2 Fold Change
+        # Compute mean expression for each group
         mean_control = g1.mean()
         mean_problem = g2.mean()
 
-        # Prevenir división por cero
+        # Compute log2 fold change, avoiding division by zero
         if mean_control == 0:
             logfc = np.nan
         else:
@@ -51,29 +53,29 @@ def differential_expression(df, control_samples, problem_samples):
         results.append((gene, pval, logfc))
 
     if not results:
-        raise ValueError("No hay suficientes datos para realizar el análisis.")
+        raise ValueError("Not enough data to perform the analysis.")
 
-    # Crear DataFrame
+    # Create result DataFrame
     df_results = pd.DataFrame(results, columns=["ID", "pval", "log2FC"]).set_index("ID")
 
-    # Corrección por FDR (Benjamini-Hochberg)
+    # Adjust p-values for multiple testing using Benjamini-Hochberg FDR
     df_results["FDR"] = multipletests(df_results["pval"], method="fdr_bh")[1]
 
+    # Return sorted results by raw p-value
     return df_results.sort_values("pval")
-
 
 
 def significative_genes(df, FDR, log2FC):
     """
-    Detecta genes con expresión diferencial significativa.
-    
-    Parámetros:
-    - df: DataFrame con nombre de los genes y valores de pval y log2FC.
-    - pval: valor de pval crítico.
-    - log2FC: valor de log2FC crítico.
-    
-    Retorna:
-    - dataframe filtrada en base a los valores de pval y log2FC críticos.
+    Identifies significantly differentially expressed genes.
+
+    Parameters:
+    - df: DataFrame with gene names and values for pval and log2FC
+    - FDR: critical false discovery rate threshold
+    - log2FC: critical absolute log2 fold change threshold
+
+    Returns:
+    - Filtered DataFrame with significant genes based on FDR and log2FC cutoffs
     """
     return df[(df['FDR'] < FDR) & (abs(df['log2FC']) > log2FC)]
 
